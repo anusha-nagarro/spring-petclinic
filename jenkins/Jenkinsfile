@@ -4,14 +4,20 @@ pipeline {
     environment {
         AWS_REGION = 'eu-north-1'
         ACCOUNT_ID = '896618135625'
-        ECR_REPO = 'my-app'   // safer
+        ECR_REPO = 'my-app'
         CLUSTER_NAME = 'happy-folk-hideout'
         IMAGE_TAG = "build-${BUILD_NUMBER}"
         IMAGE_URI = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
     }
 
     stages {
-        
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
         stage('Build with Maven') {
             steps {
                 sh '''
@@ -78,24 +84,6 @@ pipeline {
                 kubectl get pods
                 '''
             }
-        }
-
-        stage('Verify Deployment') {
-            steps {
-                sh '''
-                kubectl get svc
-                kubectl get pods -o wide
-                '''
-            }
-        }
-    }
-
-    post {
-        success {
-            echo '✅ Deployment successful!'
-        }
-        failure {
-            echo '❌ Pipeline failed!'
         }
     }
 }
