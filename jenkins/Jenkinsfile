@@ -1,0 +1,109 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = 'eu-north-1'
+        ACCOUNT_ID = '896618135625'
+        ECR_REPO = 'anusha/k8'
+        CLUSTER_NAME = 'happy-folk-hideout'
+        IMAGE_TAG = "build-${BUILD_NUMBER}"
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                git 'https://github.com/anusha-nagarro/spring-petclinic.git'
+            }
+        }
+
+        stage('Build with Maven') {
+            steps {
+                sh '''
+                chmod +x mvnw
+                ./mvnw clean package -DskipTests
+                '''
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                docker build -t $ECR_REPO:$IMAGE_TAG .
+                '''
+            }
+        }
+
+        stage('Login to AWS ECR') {
+            steps {
+                sh '''
+                aws ecr get-login-password --region $AWS_REGION | \
+                docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+                '''
+            }
+        }
+
+        stage('Tag & Push Image to ECR') {
+            steps {
+                sh '''
+                docker tag $ECR_REPO:$IMAGE_TAG \
+                $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
+
+                docker push $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
+                '''
+            }
+        }
+
+        stage('Update kubeconfig') {
+            steps {
+                sh '''
+                aws eks --region $AWS_REGION update-kubeconfig --name $CLUSTER_NAME
+                '''
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                sh '''
+                kubectl apply -f k8s/
+                '''
+            }
+        }
+
+        stage('Update Image in Deployment') {
+            steps {
+                sh '''
+                kubectl set image deployment/petclinic \
+                petclinic=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
+                '''
+            }
+        }
+
+        stage('Wait for Pods') {
+            steps {
+                sh '''
+                kubectl rollout status deployment/petclinic --timeout=180s
+                kubectl get pods
+                '''
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh '''
+                kubectl get svc
+                kubectl get pods -o wide
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Deployment successful!'
+        }
+        failure {
+            echo '❌ Pipeline failed!'
+        }
+    }
+}
